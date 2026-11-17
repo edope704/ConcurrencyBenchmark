@@ -19,7 +19,7 @@ with open(file_name, newline='') as csvfile:
         y1.append(float(row['clock_realtime']))
         y2.append(float(row['clock_cputime']))
 
-    plt.title("Process benchmark [ms]", fontdict={'fontsize':"medium"} )
+    plt.title("Process benchmark [us]", fontdict={'fontsize':"medium"} )
     plt.xticks(x,x)
     plt.plot(x, y1, marker="o", label="real_time")
     plt.plot(x, y2, marker="o", label="cpu_time")

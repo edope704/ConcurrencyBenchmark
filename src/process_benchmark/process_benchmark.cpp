@@ -1,5 +1,6 @@
 #include <sys/resource.h>
 #include <sys/types.h>
+#include <time.h>
 #include <wait.h>
 
 #include <array>
@@ -17,34 +18,22 @@
 #include <span>
 #include <vector>
 
-#define MAX_PROCESSES 16
-#define ROWS 10000ul
-#define COLS 10000ul
-#define MAX_VAL 256
+#include "common.hpp"
 
-using matrix_t = std::vector<int16_t>;
-
-struct benchmark_result {
-    double wall_time_us{ 0.0 };
-    double cpu_time_us{ 0.0 };
-};
+namespace bm = common::benchmark;
 
 /* Arguments for each child process */
 struct args {
     uint16_t start_row;
     uint16_t n_rows;
     int64_t partial_sum;
+    timespec t_start, t_end;
 };
 std::span<args> process_args;
 
-std::vector<int16_t> big_matrix;
+std::vector<uint16_t> big_matrix;
 
 int16_t curr_process_index;
-
-static void fill_matrix() {
-  std::srand( std::time( nullptr ) );
-  for ( auto& elem : big_matrix ) elem = std::rand() % MAX_VAL;
-}
 
 static void process_routine() {
   auto start_index = process_args[ curr_process_index ].start_row * COLS;
@@ -54,8 +43,7 @@ static void process_routine() {
   process_args[ curr_process_index ].partial_sum = sum;
 }
 
-static benchmark_result benchmark_routine( int16_t num_processes ) {
-  int16_t n_procs{ num_processes };
+static bm::benchmark_result benchmark_routine( uint16_t num_processes ) {
   int64_t total_sum{ 0 };
   int32_t rows_per_proc, last_proc_rows{ 0 };
   std::array<pid_t, MAX_PROCESSES> pids;
@@ -69,12 +57,12 @@ static benchmark_result benchmark_routine( int16_t num_processes ) {
   }();
 
   /* setup process_args */
-  rows_per_proc = ROWS / n_procs;
-  last_proc_rows = rows_per_proc + ROWS % n_procs;
+  rows_per_proc = ROWS / num_processes;
+  last_proc_rows = rows_per_proc + ROWS % num_processes;
 
-  for ( auto i{ 0uz }; i < n_procs; i++ ) {
+  for ( auto i{ 0uz }; i < num_processes; i++ ) {
     process_args[ i ].start_row = i * rows_per_proc;
-    if ( i == n_procs - 1 )
+    if ( i == num_processes - 1 )
       process_args[ i ].n_rows = last_proc_rows;
     else
       process_args[ i ].n_rows = rows_per_proc;
@@ -85,10 +73,11 @@ static benchmark_result benchmark_routine( int16_t num_processes ) {
   rusage ru_self_start, ru_self_end;
   getrusage( RUSAGE_CHILDREN, &ru_children_start );
   getrusage( RUSAGE_SELF, &ru_self_start );
-  auto wall_start = std::chrono::steady_clock::now();
+  timespec wall_start, wall_end;
+  clock_gettime( CLOCK_REALTIME, &wall_start );
 
   /* Calculate partial sums */
-  for ( curr_process_index = 0; curr_process_index < n_procs; curr_process_index++ ) {
+  for ( curr_process_index = 0; curr_process_index < num_processes; curr_process_index++ ) {
     pids[ curr_process_index ] = fork();
     if ( pids[ curr_process_index ] == 0 ) {
       process_routine();
@@ -97,7 +86,7 @@ static benchmark_result benchmark_routine( int16_t num_processes ) {
   }
 
   /* Wait for process_routine() end for each thread and calculate total_sum */
-  for ( curr_process_index = 0; curr_process_index < n_procs; curr_process_index++ ) {
+  for ( curr_process_index = 0; curr_process_index < num_processes; curr_process_index++ ) {
     waitpid( pids[ curr_process_index ], NULL, 0 );
     total_sum += process_args[ curr_process_index ].partial_sum;
   }
@@ -105,23 +94,20 @@ static benchmark_result benchmark_routine( int16_t num_processes ) {
   /* Stop measuring wall time and CPU time */
   getrusage( RUSAGE_CHILDREN, &ru_children_end );
   getrusage( RUSAGE_SELF, &ru_self_end );
-  auto wall_end = std::chrono::steady_clock::now();
+  clock_gettime( CLOCK_REALTIME, &wall_end );
 
-  auto timeval_to_us = []( const timeval& tv ) {
-    return static_cast<double>( tv.tv_sec ) * 1e6 + static_cast<double>( tv.tv_usec );
-  };
+  auto wall_time_us = ( bm::timespec_to_us( wall_end ) - bm::timespec_to_us( wall_start ) );
 
-  double wall_time_us = std::chrono::duration<double, std::micro>( wall_end - wall_start ).count();
+  auto children_cpu_us = ( bm::timeval_to_us( ru_children_end.ru_utime ) -
+                           bm::timeval_to_us( ru_children_start.ru_utime ) ) +
+                         ( bm::timeval_to_us( ru_children_end.ru_stime ) -
+                           bm::timeval_to_us( ru_children_start.ru_stime ) );
 
-  double children_cpu_us =
-      ( timeval_to_us( ru_children_end.ru_utime ) - timeval_to_us( ru_children_start.ru_utime ) ) +
-      ( timeval_to_us( ru_children_end.ru_stime ) - timeval_to_us( ru_children_start.ru_stime ) );
+  auto parent_cpu_us =
+      ( bm::timeval_to_us( ru_self_end.ru_utime ) - bm::timeval_to_us( ru_self_start.ru_utime ) ) +
+      ( bm::timeval_to_us( ru_self_end.ru_stime ) - bm::timeval_to_us( ru_self_start.ru_stime ) );
 
-  double parent_cpu_us =
-      ( timeval_to_us( ru_self_end.ru_utime ) - timeval_to_us( ru_self_start.ru_utime ) ) +
-      ( timeval_to_us( ru_self_end.ru_stime ) - timeval_to_us( ru_self_start.ru_stime ) );
-
-  double total_cpu_us = children_cpu_us + parent_cpu_us;
+  auto total_cpu_us = children_cpu_us + parent_cpu_us;
 
   return { wall_time_us, total_cpu_us };
 }
@@ -129,13 +115,15 @@ static benchmark_result benchmark_routine( int16_t num_processes ) {
 int main() {
   /* setup matrix */
   big_matrix.resize( ROWS * COLS );
-  fill_matrix();
+  common::fill_matrix( big_matrix );
+
   std::ofstream bm( "process_benchmark.csv" );
   if ( !bm.is_open() ) {
     std::printf( "ERROR: Unable to open 'process_benchmark.csv'\n" );
-    std::exit;
+    std::exit( 1 );
   }
   std::println( bm, "nProcesses,clock_realtime,clock_cputime" );
+  std::printf( "nProcesses,clock_realtime,clock_cputime\n" );
 
   /* Run benchmark */
   for ( auto num_procs{ 1uz }; num_procs <= MAX_PROCESSES; num_procs++ ) {

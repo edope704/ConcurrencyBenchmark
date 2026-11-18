@@ -6,14 +6,15 @@
 #include <cstdint>
 #include <ctime>
 #include <random>
+#include <thread>
 #include <vector>
 
-#define MAX_PROCESSES 16
-#define MAX_THREADS 16
+#define MAX_PROCESSES 20
+#define MAX_THREADS 20
 
 #define ROWS 10000ul
 #define COLS 10000ul
-#define MAX_VAL 256
+#define MAX_VAL 256u
 
 namespace common {
 

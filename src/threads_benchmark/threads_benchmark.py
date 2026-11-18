@@ -19,10 +19,17 @@ with open(file_name, newline='') as csvfile:
         y1.append(float(row['clock_realtime']))
         y2.append(float(row['clock_cputime']))
 
-    plt.title("Threads benchmark [us]", fontdict={'fontsize':"medium"} )
-    plt.xticks(x,x)
-    plt.plot(x, y1, marker="o", label="real_time")
-    plt.plot(x, y2, marker="o", label="cpu_time")
-    plt.legend(loc="upper left")
-    plt.savefig(os.path.splitext(file_name)[0]+'.png')
+    fig, (real_time, cpu_time) = plt.subplots(2, sharex=True)
+    fig.suptitle("Threads benchmark [us]", fontsize="medium")
+
+    real_time.set_title("real_time")
+    real_time.plot(x, y1, marker="o")
+    real_time.set_xticks(x)
+
+    cpu_time.set_title("cpu_time")
+    cpu_time.plot(x, y2, marker="o")
+    cpu_time.set_xticks(x)
+
+    fig.tight_layout()
+    fig.savefig(os.path.splitext(file_name)[0]+'.png')
     

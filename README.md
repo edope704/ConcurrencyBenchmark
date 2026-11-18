@@ -24,10 +24,11 @@ After building, the project is organized as follows:
 
 ```text
 ConcurrencyBenchmark/
-├── build/                           # benchmark results
-│   ├── process_benchmark/
-│   └── threads_benchmark/
-└── src/                             # source code
+├── build/                         # build files
+├── img/                           
+│   ├── example/                   # example results
+│   └── results/                   # benchmark results
+└── src/                           # source code
     ├── common/
     ├── process_benchmark/
     └── threads_benchmark/
